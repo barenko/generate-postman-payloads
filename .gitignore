@@ -1,2 +1,4 @@
 node_modules
+responses/
 *.postman_collection.json
+.vscode
