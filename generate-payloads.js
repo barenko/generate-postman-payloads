@@ -5,6 +5,14 @@ const fs = require('fs-extra')
 const chalk = require( 'chalk' )
 const jp = require('jsonpath')
 const argv = require( 'minimist' )( process.argv.slice( 2 ) )
+const { createHash } = require('node:crypto')
+const json = require('json-keys-sort')
+
+const md5 = (content) => createHash('md5').update(JSON.stringify(content)).digest('hex')
+
+const arraySort = (arr) => arr.map(deepSort).sort(sortArray, (a, b) => md5(a).localeCompare(md5(b)))
+
+const deepSort = (obj)=> Array.isArray(obj) ? arraySort(obj) : json.sort(obj)
 
 const help = () => {
     console.log( 'Usage:' )
@@ -12,6 +20,7 @@ const help = () => {
     console.log( `\t\t[${chalk.red( '--postman' )}=/path/to/postman/collection.json] \\` )
     console.log( `\t\t[${chalk.blue( '--output' )}=/path/to/save] \\` )
     console.log( `\t\t[${chalk.blue( '--overwrite' )}] \\` )
+    console.log( `\t\t[${chalk.blue( '--sort' )}] \\` )
     console.log( `\t\t[${chalk.blue( '--sensitiveHeaders' )}=key1;key2] \\` )
     console.log( `\t\t[${chalk.blue( '--sensitiveRequestFields' )}=key1;key2] \\` )
     console.log( `\t\t[${chalk.blue( '--sensitiveResponseFields' )}=key1;key2] \\` )
@@ -19,6 +28,7 @@ const help = () => {
     console.log( `\t${chalk.red( 'postman' )}:   Path to postman collection. Required!` )
     console.log( `\t${chalk.blue( 'output' )}:    Path to where the responses will be saved. Optional. Default: ./responses` )
     console.log( `\t${chalk.blue( 'overwrite' )}: Overwrite the output folder. Optional` )
+    console.log( `\t${chalk.blue( 'sort' )}: Indicate if the fields need to be sorted. Optional.` )
     console.log( `\t${chalk.blue( 'sensitiveHeaders' )}: List of headers to be censured in the output files, separated by comma. Optional. Default: Postman-Token` )
     console.log( `\t${chalk.blue( 'sensitiveRequestFields' )}: List of payload fields to be censured in the output files, separated by comma. Each field must be described using jsonpath from 'request'. Optional. References: ${chalk.green('https://www.npmjs.com/package/jsonpath')}` )
     console.log( `\t${chalk.blue( 'sensitiveResponseFields' )}: List of payload fields to be censured in the output files, separated by comma. Each field must be described using jsonpath from 'response'. Optional. References: ${chalk.green('https://www.npmjs.com/package/jsonpath')}` )
@@ -42,6 +52,7 @@ if( argv.h || argv.help ){
 
 // Replace 'path/to/your/postman_collection.json' with the actual path to your Postman collection JSON file
 const collectionFile = argv.postman;
+const sortArray = [...argv.sortArray?.split(/\s*[;,:]\s*/) ?? []]
 const sensitiveHeaders = [...argv.sensitiveHeaders?.split(/\s*[;,:]\s*/)??[], 'Postman-Token']
 const sensitiveRequestFields = argv.sensitiveRequestFields?.split(/\s*[;,:]\s*/) ?? []
 const sensitiveResponseFields = argv.sensitiveResponseFields?.split(/\s*[;,:]\s*/) ?? []
@@ -70,14 +81,19 @@ newman.run({
     })
 
     const requestBody = JSON.parse(args.request?.body?.toString()||'{}')
-    const responseBody = JSON.parse(args.response.stream.toString()||'{}')
+    let responseBody = JSON.parse(args.response.stream.toString()||'{}')
 
     sensitiveRequestFields.forEach((i)=>{
-        jp.value(requestBody, i, 'CONFIDENTIAL')
+        jp.apply(requestBody, i, v=>'CONFIDENTIAL')
     })
+
     sensitiveResponseFields.forEach((i)=>{
-        jp.value(responseBody, i, 'CONFIDENTIAL')
+        jp.apply(responseBody, i, v=>'CONFIDENTIAL')
     })
+
+    if(sortArray){
+        responseBody = deepSort(responseBody)
+    }
 
     const response = {
         request: {
